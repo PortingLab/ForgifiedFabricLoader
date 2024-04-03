@@ -140,6 +140,7 @@ final class V1ModMetadataParser {
 			case "mixins":
 				readMixinConfigs(warnings, reader, mixins);
 				break;
+			case "access_widener": // Forgified Fabric Loader addition
 			case "accessWidener":
 				if (reader.peek() != JsonToken.STRING) {
 					throw new ParseMetadataException("Access Widener file must be a string", reader);
