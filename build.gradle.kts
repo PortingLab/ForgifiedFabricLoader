@@ -5,6 +5,7 @@ import net.fabricmc.mappingio.MappingReader
 import net.fabricmc.mappingio.adapter.MappingDstNsReorder
 import net.fabricmc.mappingio.adapter.MappingNsCompleter
 import net.fabricmc.mappingio.adapter.MappingNsRenamer
+import net.fabricmc.mappingio.adapter.MappingSourceNsSwitch
 import net.fabricmc.mappingio.tree.MappingTree
 import net.fabricmc.mappingio.tree.MemoryMappingTree
 import net.minecraftforge.gradle.common.util.RunConfig
@@ -189,6 +190,7 @@ open class GenerateMergedMappingsTask : DefaultTask() {
     fun execute() {
         // OFFICIAL -> SRG -> INTERMEDIARY
         val yarnTree = MemoryMappingTree()
+        val interToNamed = MemoryMappingTree()
         val renamed = MappingNsRenamer(yarnTree, mapOf(
             "left" to MappingsNamespace.OFFICIAL.toString(),
             "right" to MappingsNamespace.SRG.toString()
@@ -198,6 +200,9 @@ open class GenerateMergedMappingsTask : DefaultTask() {
             val mappings = it.getPath("mappings", "mappings.tiny")
             val selector = MappingDstNsReorder(yarnTree, MappingsNamespace.INTERMEDIARY.toString())
             MappingReader.read(mappings, selector)
+
+            val yarnSelector = MappingDstNsReorder(interToNamed, MappingsNamespace.INTERMEDIARY.toString(), MappingsNamespace.NAMED.toString())
+            MappingReader.read(mappings, yarnSelector)
         }
 
         // Complete INTERMEDIARY from OFFICIAL
@@ -215,10 +220,21 @@ open class GenerateMergedMappingsTask : DefaultTask() {
         @Suppress("INACCESSIBLE_TYPE")
         mergedTree.classes.forEach { c: MappingTree.ClassMapping -> c.methods.forEach { it.args.clear() } }
 
-        // OFFICIAL -> SRG -> INTERMEDIARY
-        val filteredTree = MemoryMappingTree()
-        val destFiler = MappingDstNsReorder(filteredTree, MappingsNamespace.SRG.toString(), MappingsNamespace.INTERMEDIARY.toString())
-        mergedTree.accept(destFiler)
-        outputFile.get().asFile.toPath().writeText(Tsrg2Writer.serialize(filteredTree), Charsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
+        // OFFICIAL -> SRG -> INTERMEDIARY -> NAMED
+        val finalTree = MemoryMappingTree()
+        val finalCompleter = MappingNsCompleter(finalTree, mapOf(MappingsNamespace.NAMED.toString() to MappingsNamespace.INTERMEDIARY.toString()), true)
+        val finalSelector = MappingDstNsReorder(finalCompleter, MappingsNamespace.SRG.toString(), MappingsNamespace.INTERMEDIARY.toString(), MappingsNamespace.NAMED.toString())
+        val finalDestFiler = MappingDstNsReorder(finalSelector, MappingsNamespace.SRG.toString(), MappingsNamespace.INTERMEDIARY.toString())
+        mergedTree.accept(finalDestFiler)
+        val interCompleter = MappingNsCompleter(finalTree, mapOf(MappingsNamespace.NAMED.toString() to MappingsNamespace.INTERMEDIARY.toString()), true)
+        interToNamed.accept(interCompleter)
+
+        // Remove missing srg names
+        val filtered = MemoryMappingTree()
+        val switchBack = MappingSourceNsSwitch(filtered, MappingsNamespace.OFFICIAL.toString())
+        val switchToSrg = MappingSourceNsSwitch(switchBack, MappingsNamespace.SRG.toString(), true)
+        finalTree.accept(switchToSrg)
+        
+        outputFile.get().asFile.toPath().writeText(Tsrg2Writer.serialize(filtered), Charsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
     }
 }
